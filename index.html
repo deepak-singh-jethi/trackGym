@@ -228,10 +228,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM San
 
 /* ── SYNC INDICATOR ── */
 #sync-indicator{
-  position:fixed;top:16px;left:16px;
+  position:fixed;bottom:calc(72px + var(--safe-bottom));left:50%;transform:translateX(-50%);
   background:rgba(6,214,160,.15);border:1.5px solid rgba(6,214,160,.4);
-  border-radius:20px;padding:4px 10px;font-size:11px;font-weight:600;color:var(--teal);
-  z-index:50;display:none;pointer-events:none;
+  border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600;color:var(--teal);
+  z-index:50;display:none;pointer-events:none;white-space:nowrap;
 }
 #sync-indicator.saving{border-color:rgba(255,107,53,.4);background:rgba(255,107,53,.1);color:var(--accent2);}
 </style>
@@ -270,7 +270,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM San
   <div class="screen" id="screen-workout">
     <div class="topbar">
       <div><h1>Workout</h1><div class="sub" id="workout-subtitle">Select muscle groups</div></div>
-      <button class="btn btn-accent btn-sm" id="finish-workout-btn" style="width:auto;display:none;" onclick="finishWorkout()">Finish ✓</button>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button class="btn btn-outline btn-sm" id="discard-workout-btn" style="width:auto;display:none;color:var(--danger);border-color:var(--danger);" onclick="discardWorkout()">✕ Discard</button>
+        <button class="btn btn-accent btn-sm" id="finish-workout-btn" style="width:auto;display:none;" onclick="finishWorkout()">Finish ✓</button>
+      </div>
     </div>
     <div class="scroll-body" id="workout-body"></div>
   </div>
@@ -350,7 +353,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM San
     <!-- SET TABLE -->
     <table class="set-table">
       <thead><tr>
-        <th>#</th><th id="weight-col-header">Weight (kg)</th><th>Reps</th><th>✓</th><th></th>
+        <th>#</th><th id="weight-col-header">Weight (kg)</th><th id="reps-col-header">Reps</th><th>✓</th><th></th>
       </tr></thead>
       <tbody id="sets-tbody"></tbody>
     </table>
@@ -388,9 +391,24 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM San
   <div id="confirm-box">
     <h3 id="confirm-title">Are you sure?</h3>
     <p id="confirm-msg">This action cannot be undone.</p>
+    <div id="confirm-typed-row" style="display:none;margin-bottom:12px;">
+      <input id="confirm-typed-input" style="background:var(--card2);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;font-family:'DM Sans',sans-serif;padding:8px 12px;width:100%;" type="text" autocomplete="off"/>
+    </div>
     <div class="btn-row">
       <button class="btn btn-outline" onclick="closeConfirm()">Cancel</button>
       <button class="btn btn-danger" id="confirm-ok-btn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- CUSTOM PROMPT DIALOG -->
+<div id="prompt-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:400;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:var(--surface);border-radius:18px;padding:24px;width:100%;max-width:340px;border:1px solid var(--border);">
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;margin-bottom:12px;" id="prompt-label">Enter name</div>
+    <input id="prompt-input" style="background:var(--card2);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-size:15px;font-family:'DM Sans',sans-serif;padding:10px 12px;width:100%;margin-bottom:16px;" type="text" placeholder="e.g. Cable Fly" autocomplete="off"/>
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-outline" id="prompt-cancel-btn">Cancel</button>
+      <button class="btn btn-accent" id="prompt-ok-btn">Add</button>
     </div>
   </div>
 </div>
@@ -751,6 +769,23 @@ let curExId=null, restInterval=null, restRemaining=0, confirmCallback=null;
 let selectedMuscles=[], curExIsCardio=false, modalSets=[], curRpe=null;
 let wktTimerInterval=null, wktStartTime=null;
 
+// ── Inline Prompt (replaces native prompt()) ──
+window._inlinePrompt = function(label){
+  return new Promise(resolve=>{
+    const overlay=document.getElementById('prompt-overlay');
+    const input=document.getElementById('prompt-input');
+    document.getElementById('prompt-label').textContent=label||'Enter value';
+    input.value='';
+    overlay.style.display='flex';
+    input.focus();
+    const ok=()=>{ overlay.style.display='none'; resolve(input.value||null); };
+    const cancel=()=>{ overlay.style.display='none'; resolve(null); };
+    document.getElementById('prompt-ok-btn').onclick=ok;
+    document.getElementById('prompt-cancel-btn').onclick=cancel;
+    input.onkeydown=(e)=>{ if(e.key==='Enter') ok(); if(e.key==='Escape') cancel(); };
+  });
+};
+
 // ════════════════════════════════════
 //  HELPERS
 // ════════════════════════════════════
@@ -786,20 +821,38 @@ window.toast = function(msg){
   setTimeout(()=>t.classList.remove('show'),2400);
 };
 
-window.showConfirm = function(title,msg,cb){
+window.showConfirm = function(title,msg,cb,requireTyped){
   document.getElementById('confirm-title').textContent=title;
   document.getElementById('confirm-msg').textContent=msg;
   confirmCallback=cb;
+  const typedRow=document.getElementById('confirm-typed-row');
+  const typedInput=document.getElementById('confirm-typed-input');
+  if(requireTyped){
+    typedRow.style.display='block';
+    typedInput.value='';
+    typedInput.placeholder='Type DELETE to confirm';
+    document.getElementById('confirm-ok-btn').disabled=true;
+    typedInput.oninput=function(){
+      document.getElementById('confirm-ok-btn').disabled=(typedInput.value.trim().toUpperCase()!=='DELETE');
+    };
+  } else {
+    typedRow.style.display='none';
+    document.getElementById('confirm-ok-btn').disabled=false;
+  }
   document.getElementById('confirm-overlay').classList.add('open');
 };
 window.closeConfirm = function(){
   document.getElementById('confirm-overlay').classList.remove('open');
   confirmCallback=null;
 }
-document.getElementById('confirm-ok-btn').addEventListener('click', ()=>{ closeConfirm(); if(confirmCallback) confirmCallback(); });
+document.getElementById('confirm-ok-btn').addEventListener('click', ()=>{ if(document.getElementById('confirm-ok-btn').disabled) return; closeConfirm(); if(confirmCallback) confirmCallback(); });
 
 window.getStreak = function(){
+  // Only count fully saved workouts (in state.workouts, not todaySession)
   let streak=0, d=new Date();
+  // If today has no saved workout, start checking from yesterday
+  const todaySaved=window.state.workouts.find(w=>w.date===localDateStr(d)&&w.muscles&&w.muscles.length>0);
+  if(!todaySaved) d.setDate(d.getDate()-1);
   while(true){
     const s=localDateStr(d);
     const found=window.state.workouts.find(w=>w.date===s&&w.muscles&&w.muscles.length>0);
@@ -893,7 +946,7 @@ window.renderHome = function(){
     <div class="water-row">
       <div class="water-cups" id="water-cups-home">${[...Array(8)].map((_,i)=>`<span class="water-cup ${i<cups?'filled':''}" onclick="logWater(${i+1})">💧</span>`).join('')}</div>
     </div>
-    <div style="font-size:11px;color:var(--muted);margin-top:4px">Tap a cup to mark filled</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:4px">Tap to fill · Tap filled cup again to remove</div>
   </div>`);
 
   if(session&&session.date===today){
@@ -923,7 +976,9 @@ window.renderHome = function(){
     html.push(`<button class="plan-btn" style="background:var(--card2);color:var(--text);border:1.5px solid var(--border);" onclick="navigate('stats')">View Stats →</button>`);
   } else {
     if(window.state.splitPlan){
-      const dayOfWeek=new Date().getDay();
+      // getDay(): 0=Sun,1=Mon,...,6=Sat → remap to Mon=0,Tue=1,...,Sun=6
+      const rawDay=new Date().getDay();
+      const dayOfWeek=(rawDay+6)%7;
       const plan=SPLIT_TEMPLATES[window.state.splitPlan];
       if(plan){
         const planDay=plan.days[dayOfWeek%plan.days.length];
@@ -990,6 +1045,9 @@ window.renderWorkout = function(){
   const today=todayStr(), pastToday=window.state.workouts.find(w=>w.date===today);
   if(window.state.todaySession&&window.state.todaySession.date===today){ renderExerciseList(); return; }
   const html=[];
+  if(pastToday&&pastToday.muscles&&pastToday.muscles.length>0){
+    html.push(`<div class="warn-banner">⚠️ You already logged a workout today. Starting a new one will overwrite it.</div>`);
+  }
   html.push(`<div class="sec-label">Select 1 or 2 Muscle Groups</div>`);
   html.push(`<div class="muscle-grid" id="muscle-grid">`);
   MUSCLES.forEach(m=>{
@@ -1002,12 +1060,10 @@ window.renderWorkout = function(){
   html.push(`</div>`);
   html.push(`<div style="margin-top:8px;" id="selected-preview"></div>`);
   html.push(`<button class="btn btn-accent" id="start-workout-btn" style="display:none;margin-top:8px;" onclick="startWorkout()">Start Workout 💪</button>`);
-  if(pastToday&&pastToday.muscles&&pastToday.muscles.length>0){
-    html.push(`<div class="warn-banner" style="margin-top:12px;">⚠️ You already worked out today. A new session will overwrite it.</div>`);
-  }
   document.getElementById('workout-body').innerHTML=html.join('');
   document.getElementById('workout-subtitle').textContent='Select muscle groups';
   document.getElementById('finish-workout-btn').style.display='none';
+  document.getElementById('discard-workout-btn').style.display='none';
   selectedMuscles=[];
 }
 
@@ -1058,6 +1114,7 @@ window.renderExerciseList = function(){
   const volLabel=sessionVol>0?` · ${sessionVol.toFixed(0)}kg`:'';
   document.getElementById('workout-subtitle').textContent=muscles.map(m=>m.name).join(' + ')+volLabel;
   document.getElementById('finish-workout-btn').style.display='block';
+  document.getElementById('discard-workout-btn').style.display='block';
   const html=[];
   session.muscles.forEach(mid=>{
     const m=getMuscle(mid);
@@ -1122,6 +1179,16 @@ window.finishWorkout = function(){
   });
 }
 
+window.discardWorkout = function(){
+  showConfirm('Discard Workout?','All progress from this session will be lost and not saved.',()=>{
+    stopWktTimer();
+    window.state.todaySession=null;
+    window.saveState();
+    toast('Workout discarded');
+    renderWorkout();
+  });
+}
+
 // ════════════════════════════════════
 //  MODAL — SET LOGGER
 // ════════════════════════════════════
@@ -1135,7 +1202,8 @@ window.openModal = function(key){
   document.getElementById('modal-ex-name').textContent=ex.name;
   document.getElementById('modal-ex-tip').textContent='💡 '+ex.tip;
   document.getElementById('ex-note').value=exData.note||'';
-  document.getElementById('weight-col-header').textContent=curExIsCardio?'Duration/Dist':'Weight (kg)';
+  document.getElementById('weight-col-header').textContent=curExIsCardio?'Dist/Min':'Weight (kg)';
+  document.getElementById('reps-col-header').textContent=curExIsCardio?'Intervals':'Reps';
   const pr=!curExIsCardio?getPR(exData.muscle,exData.exId):0;
   // Find last session data for this exercise
   const pastSessions=window.state.workouts.filter(w=>w.exercises&&w.exercises[key]);
@@ -1193,6 +1261,16 @@ window.toggleSetDone = function(i){
     const idx=parseInt(inp.dataset.idx), field=inp.dataset.field;
     if(!isNaN(idx)) modalSets[idx][field]=inp.value;
   });
+  // Validation: require at least reps to mark done
+  if(!modalSets[i].done){
+    const reps=parseInt(modalSets[i].r)||0;
+    if(reps<=0){ toast('Enter reps before marking done'); return; }
+    if(!curExIsCardio){
+      const weight=parseFloat(modalSets[i].w);
+      // Allow 0 weight (bodyweight) but warn if blank
+      if(modalSets[i].w===''){ toast('Enter weight (0 for bodyweight)'); return; }
+    }
+  }
   modalSets[i].done=!modalSets[i].done;
   const btn=document.querySelector(`#sets-tbody button.set-done-btn[data-idx="${i}"]`);
   if(btn){ btn.textContent=modalSets[i].done?'✓':'○'; btn.classList.toggle('done',modalSets[i].done); }
@@ -1250,8 +1328,8 @@ window.skipExercise = function(){
   toast('Exercise skipped');
 }
 
-window.addCustomExercise = function(muscle){
-  const name=prompt('Exercise name:');
+window.addCustomExercise = async function(muscle){
+  const name=await window._inlinePrompt('Exercise name:');
   if(!name||!name.trim()) return;
   const id='custom_'+Date.now();
   const ce={id,muscle,name:name.trim(),tip:'Custom exercise',custom:true};
@@ -1553,6 +1631,8 @@ window.renderHistory = function(){
   });
   html.push(`</div>`);
   document.getElementById('history-body').innerHTML=html.join('');
+  // Re-apply current filter without resetting it
+  filterHistory(historyFilter, null);
 }
 
 window.filterHistory = function(range, btn){
@@ -1713,13 +1793,13 @@ window.setSplitPlan = function(plan){
 }
 
 window.clearAllData = async function(){
-  showConfirm('Delete ALL Data?','This will erase every workout, stat, and setting permanently.',async ()=>{
+  showConfirm('Delete ALL Data?','Type DELETE below to confirm. This will erase every workout, stat, and setting permanently.',async ()=>{
     window.state = window.defaultState();
     localStorage.removeItem('ironlog_v4');
     await window.saveState();
     navigate('home');
     toast('All data cleared');
-  });
+  }, true);
 }
 </script>
 </body>
