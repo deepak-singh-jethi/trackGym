@@ -331,13 +331,17 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM San
 <div id="ex-picker-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:150;flex-direction:column;">
   <div style="background:var(--surface);width:100%;max-width:480px;margin:0 auto;height:100%;display:flex;flex-direction:column;">
     <!-- Header -->
-    <div style="padding:16px 20px 10px;border-bottom:1px solid var(--border);flex-shrink:0;">
+    <div style="padding:14px 20px 10px;border-bottom:1px solid var(--border);flex-shrink:0;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:1px;">Choose Your Exercises</div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1px;">Choose Exercises</div>
         <button onclick="document.getElementById('ex-picker-overlay').classList.remove('open')" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;padding:4px;">✕</button>
       </div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Pick what you're doing today. Tap to select.</div>
-      <!-- Search -->
+      <!-- Tab bar -->
+      <div style="display:flex;gap:4px;background:var(--card);border-radius:10px;padding:3px;margin-bottom:10px;">
+        <button id="picker-tab-pick" onclick="switchPickerTab('pick')" style="flex:1;border:none;border-radius:8px;padding:7px;font-size:13px;font-family:'DM Sans',sans-serif;font-weight:600;cursor:pointer;transition:.15s;background:var(--accent);color:#07070e;">🏋️ Exercises</button>
+        <button id="picker-tab-import" onclick="switchPickerTab('import')" style="flex:1;border:none;border-radius:8px;padding:7px;font-size:13px;font-family:'DM Sans',sans-serif;font-weight:600;cursor:pointer;transition:.15s;background:transparent;color:var(--muted);">📅 Last 7 Days</button>
+      </div>
+      <!-- Search (pick tab only) -->
       <input id="ex-picker-search" type="text" placeholder="🔍 Search exercises..." oninput="searchPickerEx(this.value)"
         style="background:var(--card2);border:1.5px solid var(--border);border-radius:10px;color:var(--text);font-size:14px;font-family:'DM Sans',sans-serif;padding:9px 14px;width:100%;"/>
     </div>
@@ -1187,6 +1191,7 @@ window.openExercisePicker = function(muscles){
   window._pickerSelected = {};
   window._pickerIsEdit = false;
   window._pickerSearch = '';
+  window._pickerTab = 'pick';
   // Pre-select exercises from last session for same muscles (smart suggestion)
   const lastMatch = window.state.workouts.find(w=>
     w.muscles && muscles.every(m=>w.muscles.includes(m)) && muscles.length===w.muscles.length
@@ -1201,15 +1206,32 @@ window.openExercisePicker = function(muscles){
   renderExercisePicker();
   document.getElementById('ex-picker-overlay').classList.add('open');
   const si=document.getElementById('ex-picker-search');
-  if(si) si.value='';
+  if(si){ si.value=''; si.style.display='block'; }
 }
 
 window.renderExercisePicker = function(){
   const muscles = window._pickerMuscles;
   const sel = window._pickerSelected;
-  const html=[];
   const q = (window._pickerSearch||'').toLowerCase().trim();
+  const tab = window._pickerTab||'pick'; // 'pick' or 'import'
 
+  // Update tab buttons
+  const tabPick=document.getElementById('picker-tab-pick');
+  const tabImport=document.getElementById('picker-tab-import');
+  if(tabPick&&tabImport){
+    tabPick.style.background=tab==='pick'?'var(--accent)':'transparent';
+    tabPick.style.color=tab==='pick'?'#07070e':'var(--muted)';
+    tabImport.style.background=tab==='import'?'var(--accent)':'transparent';
+    tabImport.style.color=tab==='import'?'#07070e':'var(--muted)';
+  }
+
+  if(tab==='import'){
+    renderImportTab();
+    return;
+  }
+
+  // ── PICK TAB ──
+  const html=[];
   muscles.forEach(mid=>{
     const m=getMuscle(mid);
     if(!m) return;
@@ -1223,19 +1245,23 @@ window.renderExercisePicker = function(){
     allEx.forEach(ex=>{
       const key=mid+'__'+ex.id;
       const checked=!!sel[key];
-      html.push(`<div onclick="togglePickerEx('${key}')" style="display:flex;align-items:center;gap:12px;background:${checked?'rgba(232,255,79,.07)':'var(--card)'};border:1.5px solid ${checked?'var(--accent)':'var(--border)'};border-radius:12px;padding:12px 14px;margin-bottom:8px;cursor:pointer;transition:.15s;">
-        <div style="width:22px;height:22px;border-radius:6px;border:2px solid ${checked?'var(--accent)':'var(--muted)'};background:${checked?'var(--accent)':'transparent'};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px;color:#07070e;font-weight:900;">${checked?'✓':''}</div>
-        <div style="flex:1;">
-          <div style="font-size:14px;font-weight:600;color:${checked?'var(--accent)':'var(--text)'};">${ex.name}${ex.custom?'<span style="font-size:10px;color:var(--teal);margin-left:6px;">custom</span>':''}</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px;">💡 ${ex.tip}</div>
+      const isCustom=!!ex.custom;
+      html.push(`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+        <div onclick="togglePickerEx('${key}')" style="flex:1;display:flex;align-items:center;gap:12px;background:${checked?'rgba(232,255,79,.07)':'var(--card)'};border:1.5px solid ${checked?'var(--accent)':'var(--border)'};border-radius:12px;padding:12px 14px;cursor:pointer;transition:.15s;">
+          <div style="width:22px;height:22px;border-radius:6px;border:2px solid ${checked?'var(--accent)':'var(--muted)'};background:${checked?'var(--accent)':'transparent'};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px;color:#07070e;font-weight:900;">${checked?'✓':''}</div>
+          <div style="flex:1;">
+            <div style="font-size:14px;font-weight:600;color:${checked?'var(--accent)':'var(--text)'};">${ex.name}${isCustom?'<span style="font-size:10px;color:var(--teal);margin-left:6px;">custom</span>':''}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px;">💡 ${ex.tip}</div>
+          </div>
         </div>
+        ${isCustom?`<button onclick="deleteCustomExercise('${ex.id}','${mid}')" style="background:var(--card);border:1.5px solid var(--border);border-radius:10px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;color:var(--muted);cursor:pointer;flex-shrink:0;font-size:14px;" title="Delete custom exercise">🗑</button>`:''}
       </div>`);
     });
   });
 
   const count=Object.keys(sel).filter(k=>sel[k]).length;
   document.getElementById('ex-picker-body').innerHTML=html.join('')||'<div style="color:var(--muted);text-align:center;padding:30px;font-size:14px;">No exercises match your search.</div>';
-  document.getElementById('ex-picker-start-btn').textContent=count>0?`Start with ${count} exercise${count>1?'s':''} 💪`:'Select exercises to start';
+  document.getElementById('ex-picker-start-btn').textContent=count>0?`Add ${count} exercise${count>1?'s':''} 💪`:'Select exercises to start';
   document.getElementById('ex-picker-start-btn').disabled=count===0;
   document.getElementById('ex-picker-start-btn').style.opacity=count===0?'.4':'1';
 }
@@ -1245,8 +1271,109 @@ window.togglePickerEx = function(key){
   renderExercisePicker();
 }
 
+window.switchPickerTab = function(tab){
+  window._pickerTab=tab;
+  const si=document.getElementById('ex-picker-search');
+  // Show/hide search only on pick tab
+  if(si) si.style.display=tab==='pick'?'block':'none';
+  renderExercisePicker();
+}
+
+window.deleteCustomExercise = function(exId, muscle){
+  showConfirm('Delete Custom Exercise?','This will remove it from your library permanently.',()=>{
+    window.state.customExercises=(window.state.customExercises||[]).filter(ce=>!(ce.id===exId&&ce.muscle===muscle));
+    // Also remove from picker selection if selected
+    delete window._pickerSelected[muscle+'__'+exId];
+    window.saveState();
+    renderExercisePicker();
+    toast('Custom exercise deleted');
+  });
+}
+
+window.renderImportTab = function(){
+  const muscles=window._pickerMuscles;
+  const sel=window._pickerSelected;
+  const html=[];
+  const now=new Date();
+
+  // Collect last 7 days that have workouts (excluding today)
+  const days=[];
+  for(let i=1;i<=7;i++){
+    const d=new Date(now.getFullYear(),now.getMonth(),now.getDate()-i);
+    const dateStr=localDateStr(d);
+    const w=window.state.workouts.find(wk=>wk.date===dateStr);
+    if(w&&Object.values(w.exercises||{}).some(ex=>ex.sets&&ex.sets.some(s=>s.done))){
+      days.push({dateStr,workout:w,d});
+    }
+  }
+
+  if(days.length===0){
+    document.getElementById('ex-picker-body').innerHTML=`<div style="text-align:center;padding:40px 20px;"><div style="font-size:40px;margin-bottom:12px;">📭</div><div style="color:var(--muted);font-size:14px;">No previous workouts found in the last 7 days.</div></div>`;
+    return;
+  }
+
+  html.push(`<div style="font-size:12px;color:var(--muted);padding:12px 0 4px;">Tap exercises to add them to today's session.</div>`);
+
+  days.forEach(({dateStr,workout,d})=>{
+    const wMuscles=(workout.muscles||[]).map(m=>getMuscle(m)).filter(Boolean);
+    const exDone=Object.values(workout.exercises||{}).filter(ex=>ex.sets&&ex.sets.some(s=>s.done));
+    const dayLabel=d.toLocaleDateString('en-IN',{weekday:'long'});
+    const dateLabel=formatDate(dateStr);
+
+    html.push(`<div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:12px;">`);
+    html.push(`<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--accent);">${dayLabel}</div>
+        <div style="font-size:11px;color:var(--muted);">${dateLabel} · ${wMuscles.map(m=>m.icon+' '+m.name).join(', ')}</div>
+      </div>
+      <button onclick="importAllFromDay('${dateStr}')" style="background:rgba(232,255,79,.1);border:1px solid rgba(232,255,79,.3);border-radius:8px;padding:5px 10px;font-size:12px;font-weight:600;color:var(--accent);cursor:pointer;white-space:nowrap;">+ All</button>
+    </div>`);
+
+    exDone.forEach(ex=>{
+      const exercise=getExercise(ex.muscle,ex.exId);
+      const m=getMuscle(ex.muscle);
+      if(!exercise||!m) return;
+      const key=ex.muscle+'__'+ex.exId;
+      const isSelected=!!sel[key];
+      const doneSets=ex.sets.filter(s=>s.done);
+      const maxW=m.noWeight?0:Math.max(...doneSets.map(s=>parseFloat(s.w)||0));
+      const totalR=doneSets.reduce((a,s)=>a+(parseInt(s.r)||0),0);
+      const summary=m.noWeight?`${doneSets.length} sets`:`${doneSets.length}×${maxW>0?maxW+'kg':'bw'}`;
+
+      html.push(`<div onclick="togglePickerEx('${key}')" style="display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;background:${isSelected?'rgba(232,255,79,.07)':'var(--card2)'};border:1.5px solid ${isSelected?'var(--accent)':'var(--border)'};margin-bottom:6px;cursor:pointer;transition:.15s;">
+        <div style="width:20px;height:20px;border-radius:5px;border:2px solid ${isSelected?'var(--accent)':'var(--muted)'};background:${isSelected?'var(--accent)':'transparent'};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:#07070e;font-weight:900;">${isSelected?'✓':''}</div>
+        <div style="flex:1;font-size:13px;font-weight:600;color:${isSelected?'var(--accent)':'var(--text)'};">${exercise.name}</div>
+        <div style="font-size:11px;color:var(--muted);">${summary}</div>
+      </div>`);
+    });
+
+    html.push(`</div>`);
+  });
+
+  const count=Object.keys(sel).filter(k=>sel[k]).length;
+  document.getElementById('ex-picker-body').innerHTML=html.join('');
+  document.getElementById('ex-picker-start-btn').textContent=count>0?`Add ${count} exercise${count>1?'s':''} 💪`:'Select exercises to start';
+  document.getElementById('ex-picker-start-btn').disabled=count===0;
+  document.getElementById('ex-picker-start-btn').style.opacity=count===0?'.4':'1';
+}
+
+window.importAllFromDay = function(dateStr){
+  const w=window.state.workouts.find(wk=>wk.date===dateStr);
+  if(!w) return;
+  let added=0;
+  Object.values(w.exercises||{}).forEach(ex=>{
+    if(ex.sets&&ex.sets.some(s=>s.done)){
+      const key=ex.muscle+'__'+ex.exId;
+      if(!window._pickerSelected[key]){ window._pickerSelected[key]=true; added++; }
+    }
+  });
+  renderExercisePicker();
+  toast(added>0?`Added ${added} exercises ✓`:'All already selected');
+}
+
 window.searchPickerEx = function(q){
   window._pickerSearch=q;
+  window._pickerTab='pick'; // searching always switches back to pick tab
   renderExercisePicker();
 }
 
@@ -1281,10 +1408,10 @@ window.reopenPickerToAdd = function(){
   if(!session) return;
   window._pickerMuscles=session.muscles;
   window._pickerSelected={};
-  // Pre-check already added exercises
   Object.keys(session.exercises).forEach(k=>{ window._pickerSelected[k]=true; });
   window._pickerSearch='';
-  window._pickerIsEdit=true; // flag: we're adding to existing session
+  window._pickerTab='pick';
+  window._pickerIsEdit=true;
   renderExercisePicker();
   const input=document.getElementById('ex-picker-search');
   if(input) input.value='';
@@ -1361,13 +1488,16 @@ window.renderExerciseList = function(){
       const volDiff=isDone&&!isCardio&&lastVol>0?vol-lastVol:0;
       const volDiffStr=volDiff>0?` ↑${volDiff.toFixed(0)}kg`:volDiff<0?` ↓${Math.abs(volDiff).toFixed(0)}kg`:'';
       const metaText=isSkipped?'Skipped — tap to undo':isDone?(isCardio?`${doneSets} sets logged`:`${doneSets} sets · ${vol.toFixed(0)} kg${volDiffStr}`):'Tap to log sets';
-      html.push(`<div class="ex-item ${isDone?'done':''} ${isSkipped?'skipped':''}" onclick="openModal('${key}')">
-        <div class="ex-dot"></div>
-        <div class="ex-info">
-          <div class="ex-name">${ex.name}${isPR?'<span class="pr-badge">🏆 PR!</span>':''}</div>
-          <div class="ex-meta">${metaText}</div>
+      html.push(`<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+        <div class="ex-item ${isDone?'done':''} ${isSkipped?'skipped':''}" onclick="openModal('${key}')" style="flex:1;margin-bottom:0;">
+          <div class="ex-dot"></div>
+          <div class="ex-info">
+            <div class="ex-name">${ex.name}${isPR?'<span class="pr-badge">🏆 PR!</span>':''}</div>
+            <div class="ex-meta">${metaText}</div>
+          </div>
+          ${isDone?`<div class="ex-sets-badge">${doneSets}×</div>`:isSkipped?'<div style="color:var(--muted);font-size:11px;padding:3px 8px;border:1px solid var(--muted);border-radius:6px;">undo</div>':'<div style="color:var(--muted);font-size:20px">›</div>'}
         </div>
-        ${isDone?`<div class="ex-sets-badge">${doneSets}×</div>`:isSkipped?'<div style="color:var(--muted);font-size:11px;padding:3px 8px;border:1px solid var(--muted);border-radius:6px;">undo</div>':'<div style="color:var(--muted);font-size:20px">›</div>'}
+        <button onclick="removeExFromSession('${key}')" style="background:var(--card);border:1.5px solid var(--border);border-radius:10px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;color:var(--muted);cursor:pointer;flex-shrink:0;font-size:15px;transition:.15s;" title="Remove exercise">🗑</button>
       </div>`);
     });
   });
@@ -1408,6 +1538,24 @@ window.discardWorkout = function(){
     toast('Workout discarded');
     renderWorkout();
   });
+}
+
+window.removeExFromSession = function(key){
+  const session=window.state.todaySession;
+  if(!session||!session.exercises[key]) return;
+  const ex=session.exercises[key];
+  const hasSets=ex.sets&&ex.sets.some(s=>s.done);
+  const doRemove=()=>{
+    delete session.exercises[key];
+    window.saveState();
+    renderExerciseList();
+    toast('Exercise removed');
+  };
+  if(hasSets){
+    showConfirm('Remove Exercise?','This exercise has logged sets. They will be lost.',doRemove);
+  } else {
+    doRemove();
+  }
 }
 
 // ════════════════════════════════════
